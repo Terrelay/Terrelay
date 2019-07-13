@@ -1,4 +1,4 @@
-from tconnection import TerrariaConnection, TClientConnection, TRelayServer
+from terrelay.tconnection import TerrariaConnection, TClientConnection, TRelayServer
 async def handle(msg, cl:TClientConnection, srv:TRelayServer):
     cmd = msg.split(" ")[0][1:]
     args = msg.split(" ")[1:]
@@ -38,6 +38,12 @@ async def help(cl:TerrariaConnection,srv:TRelayServer,args:str):
             continue
         m += "\n"+(commands[x]['help'] or x)
     await cl.sendchat(m)
+    return True
+
+@reg_command(helpstr="help - Show this text.")
+async def reload(cl:TerrariaConnection,srv:TRelayServer,args:str):
+    await srv.unload_plugins()
+    await srv.load_plugins()
     return True
 
 @reg_command(helpstr="quit <message> - Kicks you with the provided message")

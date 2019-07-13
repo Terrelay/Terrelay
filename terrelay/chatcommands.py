@@ -1,6 +1,6 @@
 from __future__ import annotations
-from tconnection import TClientConnection, TRelayServer
-from tcommands import prepstr
+from terrelay.tconnection import TClientConnection, TRelayServer
+from terrelay.tcommands import prepstr
 
 # this file re-creates the chat netmodule's commands, so that i dont have to pass them through to the server to get them.
 

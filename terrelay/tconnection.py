@@ -1,23 +1,46 @@
 from __future__ import annotations
+from typing import List
 import asyncio
 import struct
+import os
+import importlib
+import inspect
 
 real_server = ("10.1.0.199",7777)
+
+def get_plugins(d="plugins")->List[TPlugin]:
+    plugins = []
+    for x in os.scandir(d):
+        if x.is_dir():
+            plugins += get_plugins(d+os.sep+x.name)
+        else:
+            if x.name[-3:] == ".py":
+                pl = importlib.import_module(d.replace(os.sep,".")+"."+x.name[:-3])
+                importlib.reload(pl)
+                for y in dir(pl):
+                    yv = getattr(pl,y) 
+                    if inspect.isclass(yv) and issubclass(yv,TPlugin) and yv is not TPlugin:
+                        plugins.append(yv)
+    return plugins
 
 def prepstr(s:str,llen:int)->bytes:
     stlen = len(s)
     return stlen.to_bytes(llen,byteorder="big")+bytes(s,"utf-8")
 
 class TPlugin:
-    async def on_chat_message(self,cl,msg,sendall):
+    async def on_plugin_load(self,srv:TRelayServer):
         pass
-    async def on_connection(self,ip):
+    async def on_plugin_unload(self,srv:TRelayServer):
         pass
-    async def on_server_join(self,server,cl):
+    async def on_chat_message(self,srv:TRelayServer,cl:TClientConnection,msg:str,emote:bool):
         pass
-    async def on_server_leave(self,server,cl):
+    async def on_connection(self,srv:TRelayServer,cl:TClientConnection):
         pass
-    async def on_disconnect(self,cl):
+    async def on_server_join(self,srv:TRelayServer,cl:TClientConnection,server:str):
+        pass
+    async def on_server_leave(self,srv:TRelayServer,cl:TClientConnection,server:str):
+        pass
+    async def on_disconnect(self,srv:TRelayServer,cl:TClientConnection):
         pass
 
 class TRelayServer:
@@ -27,7 +50,10 @@ class TRelayServer:
         self.conns = []
         self.plugins = []
         self.loop = loop or asyncio.get_event_loop()
-        self.server = loop.run_until_complete(asyncio.start_server(self.handle_terr,self.host,self.port,loop=loop))
+
+    async def start(self):
+        self.server = await asyncio.start_server(self.handle_terr,self.host,self.port,loop=self.loop)
+        print("Server Started")
 
     async def handle_terr(self,inp,out):
         cl = TClientConnection(inp,out,self)
@@ -36,6 +62,7 @@ class TRelayServer:
         asyncio.create_task(cl.listen())
 
     async def close(self):
+        await self.unload_plugins()
         self.server.close()
         await self.server.wait_closed()
 
@@ -55,34 +82,52 @@ class TRelayServer:
         else:
             srvpkt += color
             allpkt += color
-                
-        await self.broadcastPacket(srvpkt,lambda u:src.cur_server == u.cur_server)
-        if sendall and src is not None:
-            await self.broadcastPacket(allpkt,lambda u:src.cur_server != u.cur_server)
+            
+        if src is not None:
+            await self.broadcastPacket(srvpkt,lambda u:src.cur_server == u.cur_server)
+            if sendall:
+              await self.broadcastPacket(allpkt,lambda u:src.cur_server != u.cur_server)
+        else:
+            await self.broadcastPacket(allpkt)
     
-    async def broadcastPacket(self,pkt:bytes,cond):
+    async def broadcastPacket(self,pkt:bytes,cond = None):
         for x in self.conns:
-            if cond(x): 
+            if cond is None or cond(x): 
                 await x.writepkt(pkt)
 
     async def handle_chat(self,client,chatcommand,message):
-        from chatcommands import chatcommands
+        from terrelay.chatcommands import chatcommands
         if chatcommand == "Say" and message[0] == "-":
             if await self.handle_command(client,message):
                 return
         if chatcommand in chatcommands:
+            if chatcommand in ["Say","Emote"]:
+                for plugin in self.plugins:
+                    await plugin.on_chat_message(self, client, message, emote=(chatcommand=="Emote"))
             await chatcommands[chatcommand](self, client, message)
 
-
     async def handle_command(self,client:TClientConnection,msg):
-        import tcommands
+        from terrelay import tcommands
         from importlib import reload
         tcommands = reload(tcommands)
         success = await tcommands.handle(msg,client,self)
         return success
 
+    async def load_plugins(self):
+        plugins = get_plugins()
+        for pl in plugins:
+            await self.register_plugin(pl)
+    
+    async def unload_plugins(self):
+        for plugin in self.plugins:
+            await plugin.on_plugin_unload(self)
+        self.plugins = []
+
     async def register_plugin(self,plugin:TPlugin):
-        self.plugins.append(plugin)
+        print("Registered plugin ["+plugin.__name__+"]")
+        plinstance = plugin()
+        self.plugins.append(plinstance)
+        await plinstance.on_plugin_load(self)
 
 class TerrariaConnection:
     def __init__(self, rdr, wrtr):

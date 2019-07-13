@@ -1,6 +1,7 @@
 import asyncio
 import struct
-from terrelay.tconnection import TerrariaConnection, TClientConnection, TRelayServer
+from terrelay.tconnection import TerrariaConnection, TClientConnection, TRelayServer, TPlugin
+
 
 
 if __name__ == "__main__":
@@ -11,7 +12,11 @@ if __name__ == "__main__":
     async def wakeup():
         while True:
             await asyncio.sleep(1)
+
+    loop.create_task(relaysrv.load_plugins())
+    
     loop.create_task(wakeup())
+    loop.create_task(relaysrv.start())
 
     try:
         loop.run_forever()
