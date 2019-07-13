@@ -5,6 +5,7 @@ import struct
 import os
 import importlib
 import inspect
+import traceback
 
 real_server = ("10.1.0.199",7777)
 
@@ -23,9 +24,30 @@ def get_plugins(d="plugins")->List[TPlugin]:
                         plugins.append(yv)
     return plugins
 
-def prepstr(s:str,llen:int)->bytes:
+def prepstr(s:str)->bytes:
     stlen = len(s)
-    return stlen.to_bytes(llen,byteorder="big")+bytes(s,"utf-8")
+    lenbytes = b""
+    while stlen>=128:
+        cb = (stlen&0x7f)|0x80
+        lenbytes += cb.to_bytes(1,byteorder="little")
+        stlen>>=7
+    lenbytes += stlen.to_bytes(1,byteorder="little")
+    return lenbytes+bytes(s,"utf-8")
+
+def parsestr(pkt):
+    curb = pkt[0]
+    i=slen=l=0
+    lenbytes = []
+    while curb&0x80 == 0x80:
+        i+=1
+        lenbytes.append(curb & 0x7F)
+        curb = pkt[i]
+    lenbytes.append(curb & 0x7F)
+    for x in lenbytes:
+        slen+=x<<7*l
+        l+=1
+    s = pkt[i+1:i+1+slen]
+    return (i+1+len(s),s.decode("utf-8"))
 
 class TPlugin:
     async def on_plugin_load(self,srv:TRelayServer):
@@ -70,11 +92,11 @@ class TRelayServer:
         srvpkt = allpkt = b"\x52\x01\x00"
         allpkt += b"\xff\x00"
         if author is not None:
-            srvpkt += bytes(author.prmyslot) + b"\x00" + prepstr(message,2)
-            allpkt += prepstr("<"+author.name+">"+message,1)
+            srvpkt += author.prmyslot.to_bytes(1,byteorder="little") + b"\x00" + prepstr(message)
+            allpkt += prepstr("<"+author.name+"> "+message)
         else:
-            srvpkt += b"\xff\x00" + prepstr(message,1)
-            allpkt += prepstr(message,1)
+            srvpkt += b"\xff\x00" + prepstr(message)
+            allpkt += prepstr(message)
         
         if color is None:
             srvpkt += b"\xff\xff\xff"
@@ -103,24 +125,34 @@ class TRelayServer:
         if chatcommand in chatcommands:
             if chatcommand in ["Say","Emote"]:
                 for plugin in self.plugins:
-                    await plugin.on_chat_message(self, client, message, emote=(chatcommand=="Emote"))
+                    try:
+                        await plugin.on_chat_message(self, client, message, emote=(chatcommand=="Emote"))
+                    except:
+                        print("Plugin Error on chat message:"+type(plugin).__name__)
+                        traceback.print_exc()
             await chatcommands[chatcommand](self, client, message)
 
     async def handle_command(self,client:TClientConnection,msg):
         from terrelay import tcommands
-        from importlib import reload
-        tcommands = reload(tcommands)
         success = await tcommands.handle(msg,client,self)
         return success
 
     async def load_plugins(self):
         plugins = get_plugins()
-        for pl in plugins:
-            await self.register_plugin(pl)
-    
+        for plugin in plugins:
+            try:
+                await self.register_plugin(plugin)
+            except:
+                print("error occured when loading "+type(plugin).__name__)
+                traceback.print_exc()
+
     async def unload_plugins(self):
         for plugin in self.plugins:
-            await plugin.on_plugin_unload(self)
+            try:
+                await plugin.on_plugin_unload(self)
+            except:
+                print("error occured when unloading "+type(plugin).__name__)
+                traceback.print_exc()
         self.plugins = []
 
     async def register_plugin(self,plugin:TPlugin):
@@ -138,16 +170,20 @@ class TerrariaConnection:
         await self.writer.wait_closed()
 
     async def writepkt(self, d:bytes):
+        if self.writer.is_closing():
+            raise ConnectionResetError()
         dl = (len(d)+2).to_bytes(2,byteorder="little")
         self.writer.write(dl+d)
 
     async def readpkt(self)->bytes:
+        if self.writer.is_closing():
+            raise ConnectionResetError()
         i = await self.reader.readexactly(2)
         i = int.from_bytes(i,byteorder="little")-2
         return await self.reader.readexactly(i)
 
     async def sendchat(self, msg:str, color:bytes=b"\xff\xff\xff"):
-        await self.writepkt(b"\x52\x01\x00\xff\x00"+prepstr(msg,1)+color)
+        await self.writepkt(b"\x52\x01\x00\xff\x00"+prepstr(msg)+color)
 
     async def listen(self):
         while True:
@@ -157,8 +193,10 @@ class TerrariaConnection:
             except asyncio.IncompleteReadError:
                 await self.close()
                 break
-            except Exception as e: # no other exception matters.
-                import traceback
+            except ConnectionResetError:
+                await self.close()
+                break
+            except: # no other exception matters.
                 traceback.print_exc()
                 continue
 
@@ -178,6 +216,7 @@ class TClientConnection(TerrariaConnection):
         self.cur_server = None
         self.server = srv
         self.name = ""
+        self.pos = [0,0]
         self.partycolor = None
         TerrariaConnection.__init__(self,rdr,wrtr)
 
@@ -239,14 +278,10 @@ class TClientConnection(TerrariaConnection):
             if self.respawn_on_world:
                 await self.respawn()
         elif pkt[0] == 0x03:
-            print(pkt)
             self.prmyslot = pkt[1]
 
         if self.ingame and pkt[0] in [0x25]:
             return
-
-        if pkt[0] == 0x0c:
-            print(pkt)
 
         await self.writepkt(pkt)
 
@@ -255,22 +290,20 @@ class TClientConnection(TerrariaConnection):
             self.initpkts.append(pkt)
 
         if pkt[0] == 0x0c and self.respawn_on_world:
-            print("!!")
             await self.respawn()
             self.respawn_on_world = False
+        if pkt[0] == 0x0d:
+            self.pos = [pkt[5:9],pkt[9:13]]
         
         if not self.ingame and pkt[0] == 0x0c:
             await self.sendchat("Welcome! This server uses TERRPROXY.\nType -help for a list of commands.",b"\x00\xff\xff")
             self.ingame = True
         if pkt[0] == 0x52: # load netmodule
             u1,u2 = pkt[1:3]
-            tlen = pkt[3]
-            t = pkt[4:4+tlen].decode("utf-8")
+            tl,t = parsestr(pkt[3:])
             try:
-                msglen = pkt[5+tlen]
-                msg = pkt[5+tlen:5+tlen+msglen].decode("utf-8")
+                _,msg = parsestr(pkt[3+tl:])
             except:
-                msglen = 0
                 msg = ""
             if u1==0x01 and u2==0x00: # chat netmodule
                 await self.server.handle_chat(self,t,msg)

@@ -1,7 +1,5 @@
 from __future__ import annotations
-from terrelay.tconnection import TClientConnection, TRelayServer
-from terrelay.tcommands import prepstr
-
+from terrelay.tconnection import TClientConnection, TRelayServer, prepstr
 # this file re-creates the chat netmodule's commands, so that i dont have to pass them through to the server to get them.
 
 async def EmoteCommand(srv:TRelayServer,cl:TClientConnection,msg:str):
@@ -20,7 +18,7 @@ async def SayCommand(srv:TRelayServer,cl:TClientConnection,msg:str):
     await srv.broadcastChat(cl,author=cl,message=msg)
 
 async def PartyCommand(srv:TRelayServer,cl:TClientConnection,msg:str):
-    await cl.prcon.writepkt(b"\x52\x01\x00"+prepstr("Party",1)+prepstr(msg,1)) # hacks!
+    await cl.prcon.writepkt(b"\x52\x01\x00"+prepstr("Party")+prepstr(msg)) # hacks!
 
 chatcommands = {
     "Emote": EmoteCommand,
