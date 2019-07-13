@@ -1,5 +1,6 @@
 from __future__ import annotations
 from terrelay.tconnection import TPlugin, TClientConnection, TRelayServer
+from terrelay.tcommands import reg_command
 from plugins.discordchat.creds import clienttkn
 import asyncio
 import discord
@@ -21,8 +22,8 @@ class DiscordChat(TPlugin):
             return
         if len(message.content) == 0:
             return
-        tmsg = "[Discord] "+message.author.name+": "+message.content[:200]
-        await self.srv.broadcastChat(None,message=tmsg,color=b"\x5e\xa2\xe6")
+        tmsg = "[Discord] "+message.author.name+": "+message.content
+        await self.srv.broadcastChat(None,message=tmsg,color=b"\x5e\xa2\xe6") 
 
     async def on_plugin_load(self,srv:TRelayServer):
         print("Loaded DiscordChat")
@@ -44,3 +45,4 @@ class DiscordChat(TPlugin):
         pass
     async def on_disconnect(self,srv:TRelayServer,cl:TClientConnection):
         pass
+    
