@@ -18,7 +18,7 @@
 
 import asyncio
 import struct
-from tconnection import TerrariaConnection, TClientConnection, TRelayServer
+from terrelay.tconnection import TerrariaConnection, TClientConnection, TRelayServer
 
 
 if __name__ == "__main__":
