@@ -1,0 +1,7 @@
+0x52:
+byte unk always 1? 
+byte unk always 0? (Changing this to 0xff seems to make it legacy mode?)
+byte typestrlen
+str[typestrlen] typestr (can be Emotion/Say/Party/Playing/Roll)
+byte msglen
+str[msglen] msg
