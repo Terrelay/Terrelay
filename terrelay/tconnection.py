@@ -227,7 +227,7 @@ class TClientConnection(TerrariaConnection):
     async def set_server(self,dst):
         if self.ingame: # we are in a server already, 
             if self.cur_server == dst: # if we're setting to the current server, just respawn.
-                self.respawn()
+                await self.respawn()
                 await self.sendchat("You're already connected to this server!",b"\xff\x22\x22")
                 return
             
