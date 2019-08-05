@@ -1,13 +1,13 @@
 import asyncio
 import struct
 from terrelay.tconnection import TerrariaConnection, TClientConnection, TRelayServer, TPlugin
-
+from settings import server_bind
 
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
 
-    relaysrv = TRelayServer(("0.0.0.0",7777),loop=loop)
+    relaysrv = TRelayServer(server_bind,loop=loop)
 
     async def wakeup():
         while True:

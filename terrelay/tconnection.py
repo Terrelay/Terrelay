@@ -1,4 +1,3 @@
-from __future__ import annotations
 from typing import List
 import asyncio
 import struct
@@ -6,23 +5,7 @@ import os
 import importlib
 import inspect
 import traceback
-
-real_server = ("10.1.0.199",7777)
-
-def get_plugins(d="plugins")->List[TPlugin]:
-    plugins = []
-    for x in os.scandir(d):
-        if x.is_dir():
-            plugins += get_plugins(d+os.sep+x.name)
-        else:
-            if x.name[-3:] == ".py":
-                pl = importlib.import_module(d.replace(os.sep,".")+"."+x.name[:-3])
-                importlib.reload(pl)
-                for y in dir(pl):
-                    yv = getattr(pl,y) 
-                    if inspect.isclass(yv) and issubclass(yv,TPlugin) and yv is not TPlugin:
-                        plugins.append(yv)
-    return plugins
+from settings import default_hub
 
 def prepstr(s:str)->bytes:
     stlen = len(s)
@@ -50,20 +33,35 @@ def parsestr(pkt):
     return (i+1+len(s),s.decode("utf-8"))
 
 class TPlugin:
-    async def on_plugin_load(self,srv:TRelayServer):
+    async def on_plugin_load(self,srv):
         pass
-    async def on_plugin_unload(self,srv:TRelayServer):
+    async def on_plugin_unload(self,srv):
         pass
-    async def on_chat_message(self,srv:TRelayServer,cl:TClientConnection,msg:str,emote:bool):
+    async def on_chat_message(self,srv,cl,msg:str,emote:bool):
         pass
-    async def on_connection(self,srv:TRelayServer,cl:TClientConnection):
+    async def on_connection(self,srv,cl):
         pass
-    async def on_server_join(self,srv:TRelayServer,cl:TClientConnection,server:str):
+    async def on_server_join(self,srv,cl,server:str):
         pass
-    async def on_server_leave(self,srv:TRelayServer,cl:TClientConnection,server:str):
+    async def on_server_leave(self,srv,cl,server:str):
         pass
-    async def on_disconnect(self,srv:TRelayServer,cl:TClientConnection):
+    async def on_disconnect(self,srv,cl):
         pass
+
+def get_plugins(d="plugins")->List[TPlugin]:
+    plugins = []
+    for x in os.scandir(d):
+        if x.is_dir():
+            plugins += get_plugins(d+os.sep+x.name)
+        else:
+            if x.name[-3:] == ".py":
+                pl = importlib.import_module(d.replace(os.sep,".")+"."+x.name[:-3])
+                importlib.reload(pl)
+                for y in dir(pl):
+                    yv = getattr(pl,y) 
+                    if inspect.isclass(yv) and issubclass(yv,TPlugin) and yv is not TPlugin:
+                        plugins.append(yv)
+    return plugins
 
 class TRelayServer:
     def __init__(self,listen_addr,loop=None):
@@ -79,16 +77,15 @@ class TRelayServer:
 
     async def handle_terr(self,inp,out):
         cl = TClientConnection(inp,out,self)
-        await cl.set_server(real_server)
+        await cl.set_server(default_hub)
         self.conns.append(cl)
-        asyncio.create_task(cl.listen())
+        self.loop.create_task(cl.listen())
 
     async def close(self):
         await self.unload_plugins()
         self.server.close()
-        await self.server.wait_closed()
 
-    async def broadcastChat(self,src:TClientConnection,author:TClientConnection=None,message:str="",color:bytes=None,sendall=True):
+    async def broadcastChat(self,src,author=None,message:str="",color:bytes=None,sendall=True):
         srvpkt = allpkt = b"\x52\x01\x00"
         allpkt += b"\xff\x00"
         if author is not None:
@@ -132,7 +129,7 @@ class TRelayServer:
                         traceback.print_exc()
             await chatcommands[chatcommand](self, client, message)
 
-    async def handle_command(self,client:TClientConnection,msg):
+    async def handle_command(self,client,msg):
         from terrelay import tcommands
         success = await tcommands.handle(msg,client,self)
         return success
@@ -167,20 +164,21 @@ class TerrariaConnection:
 
     async def close(self):
         self.writer.close()
-        await self.writer.wait_closed()
 
-    async def writepkt(self, d:bytes):
-        if self.writer.is_closing():
+    async def writepkt(self, d:bytes): 
+        if self.writer.transport.is_closing():
             raise ConnectionResetError()
         dl = (len(d)+2).to_bytes(2,byteorder="little")
         self.writer.write(dl+d)
 
     async def readpkt(self)->bytes:
-        if self.writer.is_closing():
+        if self.writer.transport.is_closing():
             raise ConnectionResetError()
         i = await self.reader.readexactly(2)
         i = int.from_bytes(i,byteorder="little")-2
         return await self.reader.readexactly(i)
+
+
 
     async def sendchat(self, msg:str, color:bytes=b"\xff\xff\xff"):
         await self.writepkt(b"\x52\x01\x00\xff\x00"+prepstr(msg)+color)
@@ -223,7 +221,7 @@ class TClientConnection(TerrariaConnection):
     async def init_proxy(self,dest):
         self.prcon = TProxyConnection(dest,self.handle_pr_pkt)
         await self.prcon.connect()
-        asyncio.create_task(self.prcon.listen())
+        asyncio.get_event_loop().create_task(self.prcon.listen())
         self.cur_server = dest
 
     async def set_server(self,dst):

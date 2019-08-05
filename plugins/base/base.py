@@ -1,6 +1,7 @@
-from __future__ import annotations
+#from __future__ import annotations
 from terrelay.tconnection import TPlugin, TClientConnection, TRelayServer, prepstr
 from terrelay.tcommands import reg_command, commands
+from settings import default_hub
 
 @reg_command(helpstr="help - Show this text.")
 async def help(cl:TClientConnection,srv:TRelayServer,args):
@@ -23,13 +24,8 @@ async def quit(cl:TClientConnection,srv:TRelayServer,args):
     return True
 
 @reg_command(helpstr=None)
-async def serv1(cl:TClientConnection,srv:TRelayServer,args):
-    await cl.set_server(("10.1.0.199",7777))
-    return True
-
-@reg_command(helpstr=None)
-async def serv2(cl:TClientConnection,srv:TRelayServer,args):
-    await cl.set_server(("10.1.0.199",7778))
+async def hub(cl:TClientConnection,srv:TRelayServer,args):
+    await cl.set_server(default_hub)
     return True
 
 @reg_command(helpstr=None)
